@@ -1,0 +1,292 @@
+{
+  "name": "QA Bug Report Automation",
+  "properties": {
+    "description": "Automates QA bug reporting: captures bug details via Microsoft Forms, logs to Excel tracker, and sends email notification — eliminating 3 manual steps per bug report.",
+    "environment": {
+      "name": "Default"
+    },
+    "definition": {
+      "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+      "contentVersion": "1.0.0.0",
+      "parameters": {
+        "$connections": {
+          "defaultValue": {},
+          "type": "Object"
+        },
+        "$authentication": {
+          "defaultValue": {},
+          "type": "SecureObject"
+        }
+      },
+      "triggers": {
+        "When_a_new_response_is_submitted": {
+          "type": "ApiConnectionWebhook",
+          "inputs": {
+            "host": {
+              "connection": {
+                "name": "@parameters('$connections')['microsoftforms']['connectionId']"
+              }
+            },
+            "method": "post",
+            "path": "/formapi/api/forms/@{encodeURIComponent('YOUR_FORM_ID')}/triggers/newResponse",
+            "body": {
+              "eventType": "Microsoft.Forms.FormResponseSubmitted",
+              "notificationUrl": "@listCallbackUrl()"
+            }
+          },
+          "metadata": {
+            "description": "Triggers when a new QA bug report form is submitted"
+          }
+        }
+      },
+      "actions": {
+        "Get_response_details": {
+          "type": "ApiConnection",
+          "inputs": {
+            "host": {
+              "connection": {
+                "name": "@parameters('$connections')['microsoftforms']['connectionId']"
+              }
+            },
+            "method": "get",
+            "path": "/formapi/api/forms('@{encodeURIComponent('YOUR_FORM_ID')}')/responses/@{encodeURIComponent(triggerOutputs()?['body/resourceData/responseId'])}"
+          },
+          "runAfter": {},
+          "metadata": {
+            "description": "Retrieves full form response including all bug report fields"
+          }
+        },
+        "Set_Severity_Priority": {
+          "type": "Switch",
+          "expression": "@body('Get_response_details')?['r_severity']",
+          "cases": {
+            "Critical": {
+              "case": "Critical",
+              "actions": {
+                "Set_Priority_Critical": {
+                  "type": "SetVariable",
+                  "inputs": {
+                    "name": "priority_flag",
+                    "value": "🔴 CRITICAL"
+                  }
+                }
+              }
+            },
+            "High": {
+              "case": "High",
+              "actions": {
+                "Set_Priority_High": {
+                  "type": "SetVariable",
+                  "inputs": {
+                    "name": "priority_flag",
+                    "value": "🟠 HIGH"
+                  }
+                }
+              }
+            },
+            "Medium": {
+              "case": "Medium",
+              "actions": {
+                "Set_Priority_Medium": {
+                  "type": "SetVariable",
+                  "inputs": {
+                    "name": "priority_flag",
+                    "value": "🟡 MEDIUM"
+                  }
+                }
+              }
+            },
+            "Low": {
+              "case": "Low",
+              "actions": {
+                "Set_Priority_Low": {
+                  "type": "SetVariable",
+                  "inputs": {
+                    "name": "priority_flag",
+                    "value": "🟢 LOW"
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "actions": {
+              "Set_Priority_Default": {
+                "type": "SetVariable",
+                "inputs": {
+                  "name": "priority_flag",
+                  "value": "⚪ UNCLASSIFIED"
+                }
+              }
+            }
+          },
+          "runAfter": {
+            "Initialize_Priority_Variable": ["Succeeded"]
+          },
+          "metadata": {
+            "description": "Maps severity level to a visual priority flag for email and Excel"
+          }
+        },
+        "Initialize_Priority_Variable": {
+          "type": "InitializeVariable",
+          "inputs": {
+            "variables": [
+              {
+                "name": "priority_flag",
+                "type": "string",
+                "value": "⚪ UNCLASSIFIED"
+              }
+            ]
+          },
+          "runAfter": {
+            "Get_response_details": ["Succeeded"]
+          }
+        },
+        "Generate_Bug_ID": {
+          "type": "Compose",
+          "inputs": "@concat('BUG-', formatDateTime(utcNow(), 'yyyyMMdd'), '-', substring(guid(), 0, 4))",
+          "runAfter": {
+            "Set_Severity_Priority": ["Succeeded"]
+          },
+          "metadata": {
+            "description": "Generates a unique Bug ID in format BUG-20250616-a3f2"
+          }
+        },
+        "Add_row_to_Excel_Bug_Tracker": {
+          "type": "ApiConnection",
+          "inputs": {
+            "host": {
+              "connection": {
+                "name": "@parameters('$connections')['excelonlinebusiness']['connectionId']"
+              }
+            },
+            "method": "post",
+            "path": "/codeless/v1.2/drives/me/files/YOUR_EXCEL_FILE_ID/tables/BugTrackerTable/rows",
+            "body": {
+              "Bug_ID": "@{outputs('Generate_Bug_ID')}",
+              "Date_Reported": "@{formatDateTime(utcNow(), 'yyyy-MM-dd HH:mm')}",
+              "Title": "@{body('Get_response_details')?['r_bug_title']}",
+              "Environment": "@{body('Get_response_details')?['r_environment']}",
+              "Severity": "@{body('Get_response_details')?['r_severity']}",
+              "Priority_Flag": "@{variables('priority_flag')}",
+              "Steps_To_Reproduce": "@{body('Get_response_details')?['r_steps']}",
+              "Expected_Result": "@{body('Get_response_details')?['r_expected']}",
+              "Actual_Result": "@{body('Get_response_details')?['r_actual']}",
+              "Reported_By": "@{body('Get_response_details')?['r_reporter']}",
+              "Assigned_To": "@{body('Get_response_details')?['r_assignee']}",
+              "Status": "Open",
+              "Module": "@{body('Get_response_details')?['r_module']}",
+              "Build_Version": "@{body('Get_response_details')?['r_build_version']}"
+            }
+          },
+          "runAfter": {
+            "Generate_Bug_ID": ["Succeeded"]
+          },
+          "metadata": {
+            "description": "Appends a new row to the Excel Bug Tracker spreadsheet on OneDrive"
+          }
+        },
+        "Condition_Is_Critical_or_High": {
+          "type": "If",
+          "expression": {
+            "or": [
+              {
+                "equals": [
+                  "@body('Get_response_details')?['r_severity']",
+                  "Critical"
+                ]
+              },
+              {
+                "equals": [
+                  "@body('Get_response_details')?['r_severity']",
+                  "High"
+                ]
+              }
+            ]
+          },
+          "actions": {
+            "Send_Urgent_Email_Notification": {
+              "type": "ApiConnection",
+              "inputs": {
+                "host": {
+                  "connection": {
+                    "name": "@parameters('$connections')['office365']['connectionId']"
+                  }
+                },
+                "method": "post",
+                "path": "/v2/Mail",
+                "body": {
+                  "To": "@{body('Get_response_details')?['r_assignee_email']}",
+                  "Cc": "qa-lead@company.com",
+                  "Subject": "@{variables('priority_flag')} Bug Reported — @{body('Get_response_details')?['r_bug_title']} [@{outputs('Generate_Bug_ID')}]",
+                  "Body": "<html><body style='font-family: Segoe UI, sans-serif; color: #333;'><div style='background:#c0392b;padding:12px 20px;border-radius:4px 4px 0 0;'><h2 style='color:white;margin:0;'>⚠️ Urgent Bug Report</h2></div><div style='border:1px solid #ddd;padding:20px;border-radius:0 0 4px 4px;'><table style='width:100%;border-collapse:collapse;'><tr><td style='font-weight:bold;padding:8px;background:#f8f8f8;width:160px;'>Bug ID</td><td style='padding:8px;'>@{outputs('Generate_Bug_ID')}</td></tr><tr><td style='font-weight:bold;padding:8px;background:#f8f8f8;'>Title</td><td style='padding:8px;'>@{body('Get_response_details')?['r_bug_title']}</td></tr><tr><td style='font-weight:bold;padding:8px;background:#f8f8f8;'>Severity</td><td style='padding:8px;'>@{variables('priority_flag')}</td></tr><tr><td style='font-weight:bold;padding:8px;background:#f8f8f8;'>Environment</td><td style='padding:8px;'>@{body('Get_response_details')?['r_environment']}</td></tr><tr><td style='font-weight:bold;padding:8px;background:#f8f8f8;'>Module</td><td style='padding:8px;'>@{body('Get_response_details')?['r_module']}</td></tr><tr><td style='font-weight:bold;padding:8px;background:#f8f8f8;'>Build Version</td><td style='padding:8px;'>@{body('Get_response_details')?['r_build_version']}</td></tr><tr><td style='font-weight:bold;padding:8px;background:#f8f8f8;'>Reported By</td><td style='padding:8px;'>@{body('Get_response_details')?['r_reporter']}</td></tr><tr><td style='font-weight:bold;padding:8px;background:#f8f8f8;'>Assigned To</td><td style='padding:8px;'>@{body('Get_response_details')?['r_assignee']}</td></tr></table><hr style='margin:16px 0;'/><p><strong>Steps to Reproduce:</strong><br/>@{body('Get_response_details')?['r_steps']}</p><p><strong>Expected Result:</strong><br/>@{body('Get_response_details')?['r_expected']}</p><p><strong>Actual Result:</strong><br/>@{body('Get_response_details')?['r_actual']}</p><p style='color:#888;font-size:12px;margin-top:20px;'>This notification was generated automatically by the QA Bug Report Automation flow.</p></div></body></html>",
+                  "Importance": "High",
+                  "IsHtml": true
+                }
+              }
+            }
+          },
+          "else": {
+            "actions": {
+              "Send_Standard_Email_Notification": {
+                "type": "ApiConnection",
+                "inputs": {
+                  "host": {
+                    "connection": {
+                      "name": "@parameters('$connections')['office365']['connectionId']"
+                    }
+                  },
+                  "method": "post",
+                  "path": "/v2/Mail",
+                  "body": {
+                    "To": "@{body('Get_response_details')?['r_assignee_email']}",
+                    "Subject": "@{variables('priority_flag')} Bug Reported — @{body('Get_response_details')?['r_bug_title']} [@{outputs('Generate_Bug_ID')}]",
+                    "Body": "<html><body style='font-family: Segoe UI, sans-serif; color: #333;'><div style='background:#1a3c6e;padding:12px 20px;border-radius:4px 4px 0 0;'><h2 style='color:white;margin:0;'>🐛 New Bug Report</h2></div><div style='border:1px solid #ddd;padding:20px;border-radius:0 0 4px 4px;'><table style='width:100%;border-collapse:collapse;'><tr><td style='font-weight:bold;padding:8px;background:#f8f8f8;width:160px;'>Bug ID</td><td style='padding:8px;'>@{outputs('Generate_Bug_ID')}</td></tr><tr><td style='font-weight:bold;padding:8px;background:#f8f8f8;'>Title</td><td style='padding:8px;'>@{body('Get_response_details')?['r_bug_title']}</td></tr><tr><td style='font-weight:bold;padding:8px;background:#f8f8f8;'>Severity</td><td style='padding:8px;'>@{variables('priority_flag')}</td></tr><tr><td style='font-weight:bold;padding:8px;background:#f8f8f8;'>Environment</td><td style='padding:8px;'>@{body('Get_response_details')?['r_environment']}</td></tr><tr><td style='font-weight:bold;padding:8px;background:#f8f8f8;'>Module</td><td style='padding:8px;'>@{body('Get_response_details')?['r_module']}</td></tr><tr><td style='font-weight:bold;padding:8px;background:#f8f8f8;'>Build Version</td><td style='padding:8px;'>@{body('Get_response_details')?['r_build_version']}</td></tr><tr><td style='font-weight:bold;padding:8px;background:#f8f8f8;'>Reported By</td><td style='padding:8px;'>@{body('Get_response_details')?['r_reporter']}</td></tr><tr><td style='font-weight:bold;padding:8px;background:#f8f8f8;'>Assigned To</td><td style='padding:8px;'>@{body('Get_response_details')?['r_assignee']}</td></tr></table><hr style='margin:16px 0;'/><p><strong>Steps to Reproduce:</strong><br/>@{body('Get_response_details')?['r_steps']}</p><p><strong>Expected Result:</strong><br/>@{body('Get_response_details')?['r_expected']}</p><p><strong>Actual Result:</strong><br/>@{body('Get_response_details')?['r_actual']}</p><p style='color:#888;font-size:12px;margin-top:20px;'>This notification was generated automatically by the QA Bug Report Automation flow.</p></div></body></html>",
+                    "Importance": "Normal",
+                    "IsHtml": true
+                  }
+                }
+              }
+            }
+          },
+          "runAfter": {
+            "Add_row_to_Excel_Bug_Tracker": ["Succeeded"]
+          },
+          "metadata": {
+            "description": "Sends urgent email (high priority, CC to QA lead) for Critical/High bugs; standard email for Medium/Low"
+          }
+        }
+      },
+      "outputs": {}
+    },
+    "connectionReferences": {
+      "microsoftforms": {
+        "runtimeSource": "embedded",
+        "connection": {
+          "connectionReferenceLogicalName": "cr_microsoftforms"
+        },
+        "api": {
+          "name": "shared_microsoftforms"
+        }
+      },
+      "excelonlinebusiness": {
+        "runtimeSource": "embedded",
+        "connection": {
+          "connectionReferenceLogicalName": "cr_excelonlinebusiness"
+        },
+        "api": {
+          "name": "shared_excelonlinebusiness"
+        }
+      },
+      "office365": {
+        "runtimeSource": "embedded",
+        "connection": {
+          "connectionReferenceLogicalName": "cr_office365"
+        },
+        "api": {
+          "name": "shared_office365"
+        }
+      }
+    }
+  }
+}
