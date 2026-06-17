@@ -27,34 +27,46 @@ A Power Automate flow that triggers the moment a QA analyst submits a bug report
 
 ```mermaid
 flowchart TD
-    A([🧑‍💻 QA Analyst finds a bug]) --> B
+    A([QA Analyst finds a bug]) --> B
 
-    B[📋 Submits Microsoft Form\nBug Title · Severity · Environment\nSteps to Reproduce · Assignee · Module · Build]
+    B["Submit Microsoft Form
+    Bug Title, Severity, Environment
+    Steps to Reproduce, Assignee, Module, Build"]
 
-    B --> C[⚡ Power Automate Triggered\nWhen a new response is submitted]
+    B --> C["Power Automate Triggered
+    When a new response is submitted"]
 
-    C --> D[📥 Get Response Details\nFetch all form field values]
+    C --> D["Get Response Details
+    Fetch all form field values"]
 
-    D --> E[🆔 Generate Unique Bug ID\nFormat: BUG-20250616-a3f2]
+    D --> E["Generate Unique Bug ID
+    Format: BUG-20250616-a3f2"]
 
-    E --> F{🎨 Severity Switch\nWhat is the severity level?}
+    E --> F{"Severity Switch
+    What is the severity level?"}
 
-    F -->|Critical| G1[🔴 Set flag: CRITICAL]
-    F -->|High|     G2[🟠 Set flag: HIGH]
-    F -->|Medium|   G3[🟡 Set flag: MEDIUM]
-    F -->|Low|      G4[🟢 Set flag: LOW]
+    F -->|Critical| G1["Flag: CRITICAL"]
+    F -->|High| G2["Flag: HIGH"]
+    F -->|Medium| G3["Flag: MEDIUM"]
+    F -->|Low| G4["Flag: LOW"]
 
     G1 & G2 & G3 & G4 --> H
 
-    H[📊 Add Row to Excel Bug Tracker\nOneDrive · BugTrackerTable\nBug ID · Date · Title · Severity · Environment\nSteps · Expected · Actual · Assignee · Status: Open]
+    H["Add Row to Excel Bug Tracker
+    Bug ID, Date, Title, Severity, Environment
+    Steps, Expected, Actual, Assignee, Status: Open"]
 
-    H --> I{🔍 Is severity Critical or High?}
+    H --> I{"Is severity Critical or High?"}
 
-    I -->|Yes — Urgent| J[📧 Send URGENT Email\nTo: Assignee · CC: QA Lead\nRed header · High importance flag\nFull bug details in HTML table]
+    I -->|Yes - Urgent| J["Send URGENT Email
+    To: Assignee, CC: QA Lead
+    High importance flag"]
 
-    I -->|No — Standard| K[📧 Send STANDARD Email\nTo: Assignee\nBlue header · Normal importance\nFull bug details in HTML table]
+    I -->|No - Standard| K["Send STANDARD Email
+    To: Assignee
+    Normal importance"]
 
-    J --> L([✅ Done — Bug logged, tracked,\nand assignee notified automatically])
+    J --> L([Done - Bug logged, tracked, assignee notified])
     K --> L
 ```
 
